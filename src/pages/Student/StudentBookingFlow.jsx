@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import api from "../../services/api"
 import toast from "react-hot-toast"
+import { generateMeetingUrl, sendBookingEmails, storeBookingNotification } from "../../services/notificationService"
 
 const BG = "#0d1117"
 const CARD = "#161b22"
@@ -133,6 +134,8 @@ export default function StudentBookingFlow({ isOpen, onClose, onSuccess }) {
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [bookingId, setBookingId] = useState(null)
   const [bookingDone, setBookingDone] = useState(false)
+  const [meetingUrl, setMeetingUrl] = useState(null)
+  const [urlCopied, setUrlCopied] = useState(false)
   const [loadingPkgs, setLoadingPkgs] = useState(true)
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date()
@@ -171,6 +174,8 @@ export default function StudentBookingFlow({ isOpen, onClose, onSuccess }) {
     setPaymentLoading(false)
     setBookingId(null)
     setBookingDone(false)
+    setMeetingUrl(null)
+    setUrlCopied(false)
   }
 
   async function handleSelectPackage(pkg) {
@@ -240,19 +245,41 @@ export default function StudentBookingFlow({ isOpen, onClose, onSuccess }) {
     }
   }
 
-  function confirmAndSuccess() {
-    api.post("/student/bookings/confirm", {
-      booking_id: bookingId,
-      payment_id: "pay_demo_confirmed",
+  async function confirmAndSuccess() {
+    const confirmedId = bookingId || `bk_${Date.now()}`
+    const url = generateMeetingUrl(confirmedId)
+    setMeetingUrl(url)
+
+    storeBookingNotification({
+      bookingId: confirmedId,
+      coachId: selectedPackage?.coach_id,
+      studentName: 'You (Student)',
+      date: selectedDate,
+      time: selectedTime,
+      topic: sessionGoal,
+      type: sessionType,
+      meetingUrl: url,
     })
-      .then(() => {
-        setPaymentLoading(false)
-        setBookingDone(true)
-      })
-      .catch(() => {
-        setPaymentLoading(false)
-        setBookingDone(true)
-      })
+
+    sendBookingEmails({
+      studentName: 'Student',
+      coachName: selectedPackage?.coach_name || 'Coach',
+      date: selectedDate,
+      time: selectedTime,
+      topic: sessionGoal,
+      type: sessionType,
+      meetingUrl: url,
+      bookingId: confirmedId,
+    }).then(() => {
+      toast.success('Confirmation emails sent to you and your coach!')
+    })
+
+    try {
+      await api.post("/student/bookings/confirm", { booking_id: confirmedId, payment_id: "pay_demo_confirmed" })
+    } catch {}
+
+    setPaymentLoading(false)
+    setBookingDone(true)
   }
 
   async function handlePayment() {
@@ -935,54 +962,52 @@ export default function StudentBookingFlow({ isOpen, onClose, onSuccess }) {
         {/* SUCCESS SCREEN */}
         {bookingDone && (
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                background: "rgba(34,197,94,0.15)",
-                border: "2px solid #22c55e",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 20px",
-                fontSize: 36,
-                animation: "scaleIn 0.4s ease forwards",
-              }}
-            >
-              ✓
-            </div>
+            <div style={{ width: 80, height: 80, borderRadius: "50%", background: "rgba(34,197,94,0.15)", border: "2px solid #22c55e", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 36, animation: "scaleIn 0.4s ease forwards" }}>✓</div>
 
-            <style>{`
-              @keyframes scaleIn {
-                from { transform: scale(0); opacity: 0; }
-                to { transform: scale(1); opacity: 1; }
-              }
-            `}</style>
+            <style>{`@keyframes scaleIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}`}</style>
 
-            <h2 style={{ color: "#fff", fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>
-              Session Booked!
-            </h2>
-            <p style={{ color: "#8b949e", fontSize: 14, margin: "0 0 24px" }}>
-              Your session has been confirmed and payment is held in escrow.
+            <h2 style={{ color: "#fff", fontSize: 26, fontWeight: 800, margin: "0 0 8px" }}>Session Booked!</h2>
+            <p style={{ color: "#8b949e", fontSize: 14, margin: "0 0 6px" }}>
+              Your session is confirmed and payment is held in escrow.
+            </p>
+            <p style={{ color: "#22c55e", fontSize: 13, margin: "0 0 20px", fontWeight: 600 }}>
+              ✉ Confirmation emails sent to you and your coach
             </p>
 
-            <div
-              style={{
-                background: CARD2,
-                border: `1px solid ${BORDER}`,
-                borderRadius: 12,
-                padding: 20,
-                textAlign: "left",
-                marginBottom: 24,
-              }}
-            >
+            {/* Meeting URL card */}
+            {meetingUrl && (
+              <div style={{ background: "rgba(141,89,255,0.1)", border: "1px solid rgba(141,89,255,0.4)", borderRadius: 12, padding: "16px 18px", marginBottom: 20, textAlign: "left" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: PURPLE, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>
+                  📹 Your Video Session Link
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ flex: 1, background: "rgba(0,0,0,0.35)", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "9px 12px", fontSize: 12, color: "#c9d1d9", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {meetingUrl}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(meetingUrl)
+                      setUrlCopied(true)
+                      setTimeout(() => setUrlCopied(false), 2500)
+                      toast.success("Meeting link copied!")
+                    }}
+                    style={{ padding: "9px 16px", background: urlCopied ? "#22c55e" : PURPLE, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
+                  >
+                    {urlCopied ? "✓ Copied" : "Copy Link"}
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "#8b949e" }}>
+                  This link was also emailed to you. Share it with your coach to start the video session.
+                </div>
+              </div>
+            )}
+
+            {/* Session summary */}
+            <div style={{ background: CARD2, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 20, textAlign: "left", marginBottom: 20 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#6e7681", fontSize: 13 }}>Coach</span>
-                  <span style={{ color: "#e6edf3", fontWeight: 600, fontSize: 13 }}>
-                    {selectedPackage?.coach_name}
-                  </span>
+                  <span style={{ color: "#e6edf3", fontWeight: 600, fontSize: 13 }}>{selectedPackage?.coach_name}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#6e7681", fontSize: 13 }}>Date</span>
@@ -994,46 +1019,20 @@ export default function StudentBookingFlow({ isOpen, onClose, onSuccess }) {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#6e7681", fontSize: 13 }}>Topic</span>
-                  <span style={{ color: "#e6edf3", fontSize: 13, maxWidth: "60%", textAlign: "right" }}>
-                    {sessionGoal}
-                  </span>
+                  <span style={{ color: "#e6edf3", fontSize: 13, maxWidth: "60%", textAlign: "right" }}>{sessionGoal}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#6e7681", fontSize: 13 }}>Type</span>
+                  <span style={{ color: sessionType === "Video Call" ? PURPLE : "#f97316", fontSize: 13, fontWeight: 600 }}>{sessionType}</span>
                 </div>
               </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button
-                onClick={onSuccess}
-                style={{
-                  width: "100%",
-                  padding: "13px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: LIME,
-                  color: "#000",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={onSuccess} style={{ width: "100%", padding: "13px", borderRadius: 10, border: "none", background: LIME, color: "#000", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                 View in Calendar →
               </button>
-              <button
-                onClick={() => {
-                  resetAll()
-                }}
-                style={{
-                  width: "100%",
-                  padding: "11px",
-                  borderRadius: 10,
-                  border: `1px solid ${BORDER}`,
-                  background: "transparent",
-                  color: "#8b949e",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={resetAll} style={{ width: "100%", padding: "11px", borderRadius: 10, border: `1px solid ${BORDER}`, background: "transparent", color: "#8b949e", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
                 Book Another Session
               </button>
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { coachAPI } from '../../services/api'
 import toast from 'react-hot-toast'
 import VideoCallModal from '../../components/coach/VideoCallModal'
+import { getBookingNotifications, clearNotification, markNotificationsRead } from '../../services/notificationService'
 
 const LIME = '#adff2f'
 const BG = '#0d1117'
@@ -54,6 +55,8 @@ export default function CoachSessions() {
   const [expandedNotes, setExpandedNotes] = useState(new Set())
   const [studentWaiting, setStudentWaiting] = useState({})
   const [form, setForm] = useState({ studentId: '1', date: '', time: '', duration: '60 min', type: 'Video Call', topic: '' })
+  const [bookingNotifs, setBookingNotifs] = useState([])
+  const [showNotifPanel, setShowNotifPanel] = useState(false)
 
   useEffect(() => {
     const checkStudentPresence = () => {
@@ -77,6 +80,16 @@ export default function CoachSessions() {
       clearInterval(pollInterval)
     }
   }, [sessions])
+
+  useEffect(() => {
+    const loadNotifs = () => setBookingNotifs(getBookingNotifications())
+    loadNotifs()
+    const id = setInterval(loadNotifs, 1000)
+    window.addEventListener('storage', loadNotifs)
+    return () => { clearInterval(id); window.removeEventListener('storage', loadNotifs) }
+  }, [])
+
+  const unreadCount = bookingNotifs.filter(n => !n.read).length
 
   const weekStart = new Date(MOCK_WEEK_START)
   weekStart.setDate(weekStart.getDate() + weekOffset * 7)
@@ -167,12 +180,65 @@ export default function CoachSessions() {
           <h1 style={{ fontSize: 22, fontWeight: 800, color: '#fff', margin: 0, letterSpacing: '1px' }}>MY SESSIONS</h1>
           <p style={{ color: 'rgba(255,255,255,0.45)', marginTop: 4, marginBottom: 0, fontSize: 14 }}>Manage and track all your coaching sessions</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          style={{ padding: '10px 22px', background: LIME, color: '#000', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}
-        >
-          + Schedule Session
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', position: 'relative' }}>
+          {/* Notification bell */}
+          <button
+            onClick={() => { setShowNotifPanel(p => !p); markNotificationsRead(); setBookingNotifs(getBookingNotifications()) }}
+            style={{ position: 'relative', padding: '10px 14px', background: unreadCount > 0 ? 'rgba(141,89,255,0.15)' : CARD, border: `1px solid ${unreadCount > 0 ? '#8d59ff' : BORDER}`, borderRadius: 10, cursor: 'pointer', fontSize: 18, color: '#fff', transition: 'all 0.15s' }}
+          >
+            🔔
+            {unreadCount > 0 && (
+              <span style={{ position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: '50%', background: '#ef4444', fontSize: 10, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>{unreadCount}</span>
+            )}
+          </button>
+
+          <button onClick={() => setShowModal(true)} style={{ padding: '10px 22px', background: LIME, color: '#000', border: 'none', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+            + Schedule Session
+          </button>
+
+          {/* Notification dropdown */}
+          {showNotifPanel && (
+            <div style={{ position: 'absolute', top: '110%', right: 0, width: 380, background: '#161b22', border: '1px solid #21262d', borderRadius: 14, boxShadow: '0 16px 48px rgba(0,0,0,0.7)', zIndex: 500, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 18px', borderBottom: '1px solid #21262d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#fff' }}>📅 New Bookings</span>
+                <button onClick={() => setShowNotifPanel(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                {bookingNotifs.length === 0 ? (
+                  <div style={{ padding: '28px 18px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>No new bookings</div>
+                ) : bookingNotifs.map(notif => (
+                  <div key={notif.id} style={{ padding: '14px 18px', borderBottom: '1px solid #21262d', background: notif.read ? 'transparent' : 'rgba(141,89,255,0.07)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: '#fff' }}>{notif.studentName}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{new Date(notif.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 4 }}>
+                      📅 {notif.date} · {notif.time}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
+                      🎯 {notif.topic} · {notif.type}
+                    </div>
+                    {notif.meetingUrl && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <div style={{ flex: 1, background: 'rgba(0,0,0,0.3)', border: '1px solid #21262d', borderRadius: 6, padding: '6px 8px', fontSize: 11, color: '#8d59ff', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {notif.meetingUrl}
+                        </div>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(notif.meetingUrl); toast.success('Meeting link copied!') }}
+                          style={{ padding: '6px 10px', background: '#8d59ff', border: 'none', borderRadius: 6, color: '#fff', fontWeight: 700, fontSize: 11, cursor: 'pointer', flexShrink: 0 }}
+                        >Copy</button>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => { clearNotification(notif.id); setBookingNotifs(getBookingNotifications()) }}
+                      style={{ marginTop: 8, background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: 11, cursor: 'pointer', padding: 0 }}
+                    >Dismiss</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
